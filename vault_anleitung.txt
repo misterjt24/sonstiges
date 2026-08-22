@@ -1,0 +1,165 @@
+## Anleitung: Passwörter mit Ansible Vault schützen
+
+### Ziel
+Passwörter wie
+- `ise_password= "C1sco12345!"`
+- `ansible_password=C1sco12345!`
+
+dürfen nicht im Klartext in Inventar- oder Host-Dateien stehen. Stattdessen legt man sie verschlüsselt in einem Vault-File ab.
+
+---
+
+## 1. Grundprinzip
+
+Ansible Vault verschlüsselt Dateien oder einzelne Variablen. Beim Ausführen von Playbooks wird das Passwort abgefragt oder aus einer Passwortdatei gelesen. Klartext-Passwörter werden aus den normalen Konfigurationsdateien entfernt.
+
+---
+
+## 2. Vorbereitung
+
+1. Wechsle in dein Ansible-Verzeichnis, z. B.:
+   ```bash
+   cd /home/user/projekte/network/ansible
+   ```
+
+2. Lege ggf. ein Vault-Passwort-Datei an (optional, aber praktisch):
+   ```bash
+   echo "MeinVaultPasswort" > ~/.ansible_vault_pass.txt
+   chmod 600 ~/.ansible_vault_pass.txt
+   ```
+
+> Hinweis: Aus Sicherheitsgründen sollte die Passwortdatei nicht im Git liegen.
+
+---
+
+## 3. Vault-Datei erstellen
+
+### Option A: Neue Datei anlegen
+Erstelle z. B. `group_vars/ise/vault.yml`:
+```bash
+ansible-vault create group_vars/ise/vault.yml
+```
+
+Dann gib das Vault-Passwort ein und schreibe die verschlüsselten Variablen hinein:
+```yaml
+ansible_password: C1sco12345!
+ise_password: C1sco12345!
+```
+
+### Option B: Einzelne Variable verschlüsseln
+Für ein Inline-Secret kannst du `encrypt_string` verwenden:
+```bash
+ansible-vault encrypt_string 'C1sco12345!' --name 'ise_password'
+```
+
+Das Ergebnis kannst du dann in eine YAML-Datei kopieren:
+```yaml
+ise_password: !vault |
+          $ANSIBLE_VAULT;1.1;AES256
+          616263...
+```
+
+---
+
+## 4. Klartext aus der `hosts`-Datei entfernen
+
+In deinem Fall entfernst du aus hosts die Zeilen:
+```ini
+ansible_password=C1sco12345!
+ise_password= "C1sco12345!"
+```
+
+Stattdessen kannst du weiterhin in der Datei die anderen Variablen stehen lassen, aber die sensiblen Werte auslagern.
+
+---
+
+## 5. Vault-Datei einbinden
+
+### Beispiel: `group_vars/ise/vault.yml`
+
+```yaml
+ansible_password: !vault |
+          $ANSIBLE_VAULT;1.1;AES256
+          ...
+ise_password: !vault |
+          $ANSIBLE_VAULT;1.1;AES256
+          ...
+```
+
+### Beispiel: `hosts` bleibt so
+```ini
+[ise]
+ise_server ansible_host=10.10.20.77
+
+[ise:vars]
+ansible_user=admin
+ansible_connection=local
+ise_host=10.10.20.77
+ise_hostname=10.10.20.77
+validate_certs=false
+ise_verify=False
+ise_version=3.3_patch_1
+```
+
+Ansible lädt dann automatisch `group_vars/ise/vault.yml` für die Gruppe `ise`.
+
+---
+
+## 6. Playbook-Ausführung
+
+```
+### Variante A: Passwort manuell eingeben
+```bash
+ansible-playbook -i ise/hosts playbook.yml --ask-vault-pass
+
+### Variante B: Passwortdatei verwenden
+```bash
+ansible-playbook -i ise/hosts playbook.yml --vault-password-file ~/.ansible_vault_pass.txt
+```
+
+---
+
+## 7. Bestehende Vault-Datei ändern
+
+### A) Mit `ansible-vault edit`
+```bash
+ansible-vault edit group_vars/ise/vault.yml
+```
+Du meldest dich mit dem Vault-Passwort an und kannst Werte ändern.
+
+### B) Einzelne verschlüsselte Variable neu erzeugen
+```bash
+ansible-vault encrypt_string 'NeuesPasswort' --name 'ise_password'
+```
+Das Ergebnis in die Vault-Datei kopieren.
+
+---
+
+## 8. Vault-Passwort ändern
+
+Wenn du das Passwort für den Vault ändern willst:
+```bash
+ansible-vault rekey group_vars/ise/vault.yml
+```
+
+Du wirst zuerst nach dem alten Passwort gefragt, dann nach dem neuen.
+
+---
+
+## 9. Empfehlung
+
+- Sensible Variablen in `group_vars/<group>/vault.yml` oder `host_vars/<host>/vault.yml` speichern.
+- Keine Klartext-Passwörter in Inventar-Dateien lassen.
+- Vault-Passwort-Datei niemals ins Repository einchecken.
+- Für Teamnutzer `--vault-password-file` oder `--vault-id` definieren.
+
+---
+
+## 10. Beispiel: Ablauf für dich
+
+1. Entferne `ansible_password` und `ise_password` aus hosts.
+2. Erstelle `ansible/group_vars/ise/vault.yml`.
+3. Füge die verschlüsselten Variablen dort ein.
+4. Starte Playbooks mit `--ask-vault-pass` oder `--vault-password-file`.
+
+Wenn du willst, kann ich dir jetzt direkt die exakten Befehle und eine passende `group_vars/ise/vault.yml`-Struktur für dein Projekt erstellen.
