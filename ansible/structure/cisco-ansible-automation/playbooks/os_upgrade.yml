@@ -1,0 +1,6 @@
+---
+- name: Cisco Betriebssysteme aktualisieren
+  hosts: ios:nxos
+  gather_facts: false
+  roles:
+    - os_upgrade

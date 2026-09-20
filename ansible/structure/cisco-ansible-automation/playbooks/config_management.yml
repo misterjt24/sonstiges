@@ -1,0 +1,6 @@
+---
+- name: Cisco Konfigurationen verwalten
+  hosts: ios:nxos
+  gather_facts: false
+  roles:
+    - config_manage

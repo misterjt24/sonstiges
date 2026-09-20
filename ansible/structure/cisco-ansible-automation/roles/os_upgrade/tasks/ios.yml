@@ -1,0 +1,9 @@
+---
+- name: [IOS] Version prüfen
+  cisco.ios.ios_facts:
+    gather_subset: min
+  register: ios_facts_result
+
+- name: [IOS] Hinweis zum Upgrade
+  ansible.builtin.debug:
+    msg: "Zielversion ist {{ target_ios_version }}. Aktuell installiert: {{ ios_facts_result.ansible_facts.ansible_net_version }}"

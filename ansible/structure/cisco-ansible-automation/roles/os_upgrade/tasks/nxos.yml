@@ -1,0 +1,9 @@
+---
+- name: NXOS Version prüfen
+  cisco.nxos.nxos_facts:
+    gather_subset: min
+  register: nxos_facts_result
+
+- name: NXOS Hinweis zum Upgrade
+  ansible.builtin.debug:
+    msg: "Zielversion ist {{ target_nxos_version }}. Aktuell installiert: {{ nxos_facts_result.ansible_facts.ansible_net_version }}"

@@ -1,0 +1,10 @@
+---
+- name: Running-Config sichern
+  ansible.netcommon.cli_config:
+    command: "show running-config"
+  register: running_config
+
+- name: Backup-Datei lokal speichern
+  ansible.builtin.copy:
+    content: "{{ running_config.stdout }}"
+    dest: "./backups/{{ inventory_hostname }}_{{ ansible_date_time.date | default('today') }}.cfg"

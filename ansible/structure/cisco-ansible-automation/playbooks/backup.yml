@@ -1,0 +1,6 @@
+---
+- name: Cisco Konfigurationen sichern
+  hosts: ios:nxos
+  gather_facts: false
+  roles:
+    - backup

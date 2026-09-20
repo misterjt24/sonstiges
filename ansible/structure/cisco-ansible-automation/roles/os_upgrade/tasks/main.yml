@@ -1,0 +1,3 @@
+---
+- name: OS-spezifischen Upgrade-Task aufrufen
+  ansible.builtin.include_tasks: "{{ ansible_network_os.split('.')[-1] }}.yml"

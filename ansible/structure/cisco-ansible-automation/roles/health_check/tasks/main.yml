@@ -1,0 +1,9 @@
+---
+- name: Schnittstellen-Status abfragen
+  ansible.netcommon.cli_command:
+    command: "show ip interface brief"
+  register: ip_int_brief
+
+- name: Ausgabe anzeigen
+  ansible.builtin.debug:
+    var: ip_int_brief.stdout

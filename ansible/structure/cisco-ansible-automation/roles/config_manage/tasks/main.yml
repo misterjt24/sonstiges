@@ -1,0 +1,3 @@
+---
+- name: OS-spezifische Konfigurations-Tasks aufrufen
+  ansible.builtin.include_tasks: "{{ ansible_network_os.split('.')[-1] }}.yml"

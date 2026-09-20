@@ -1,0 +1,10 @@
+---
+- name: NXOS Basis-Konfiguration setzen
+  cisco.nxos.nxos_config:
+    lines:
+      - ntp server 192.168.1.1
+
+- name: NXOS Veraltete Konfigurationen entfernen
+  cisco.nxos.nxos_config:
+    lines:
+      - no feature telnet

@@ -1,0 +1,6 @@
+---
+- name: Cisco Health Checks ausführen
+  hosts: ios:nxos
+  gather_facts: false
+  roles:
+    - health_check
