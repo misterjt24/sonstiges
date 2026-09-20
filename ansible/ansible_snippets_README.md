@@ -93,7 +93,10 @@ Using `rescue` to display specific error details captured during a failure.
           The task failed on {{ inventory_hostname }}.
           Error details: {{ ansible_failed_result.msg }}
 ```
+<<<<<<< HEAD
 
+=======
+>>>>>>> e03395250d7437d9d954088b3e79e423946aac07
 ---
 
 ## 6. Sonstiges
@@ -329,4 +332,8 @@ If the username we want to look up is stored in a variable named
 concatenate the username string with the rest of the argument string:
 ```python
 lookup('csvfile', username + ' file=users.csv delimiter=, col=1')
+<<<<<<< HEAD
 ```
+=======
+```
+>>>>>>> e03395250d7437d9d954088b3e79e423946aac07
