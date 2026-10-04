@@ -1,0 +1,171 @@
+---
+- name: Rotate TACACS+ Shared Secret across ISE and Cisco Device
+  hosts: all
+  # connection: local
+  gather_facts: false
+
+  vars:
+    # vault_url: {{ vault_addr }}
+    # ise_pan_host: "ise-pan.internal.domain"
+    # ise_api_user: "api_admin"
+    # ise_api_password: "{{ lookup('env', 'ISE_API_PASSWORD') }}"
+    device_vault_path: "network/data/tacacs/{{ inventory_hostname }}"
+    ise_device_ip: "{{ ansible_host | default(inventory_hostname) }}"
+    ise_device_mask: 32
+
+  vars_files:
+    - inventory/group_vars/all/all.yml
+
+  tasks:
+    # - name: Get network device by id
+    #   cisco.ise.network_device_info:
+    #     ise_hostname: "{{ise_pan_host}}"
+    #     ise_username: "{{ise_api_user}}"
+    #     ise_password: "{{ise_api_password}}"
+    #     ise_verify: "{{ise_verify}}"
+    #     ise_debug: "{{ise_debug}}"
+    #     ise_uses_api_gateway: "{{ise_uses_api_gateway}}"
+    #     ise_uses_csrf_token: "{{ise_uses_csrf_token}}"
+    #     # id: "167eaa00-7dd2-11f1-83ed-ea77f33c0095"
+
+    #   register: networks_raw
+
+    # - name: Show network device result
+    #   debug:
+    #     msg: "{{ networks_raw | default([]) }}"
+
+  # # tasks:
+    - name: TACACS+ Rotation durchführen
+      block:
+        - name: 1. Generiere neues TACACS+ Shared Secret
+          no_log: true
+          ansible.builtin.set_fact:
+            new_tacacs_secret: "{{ lookup('ansible.builtin.password', '/dev/null length=64 chars=ascii_letters,digits') }}"
+
+        - name: 2. Holen der ISE Network Device ID via REST API
+          no_log: true
+          ansible.builtin.uri:
+            url: "https://{{ ise_pan_host }}:9060/ers/config/networkdevice?filter=name.EQ.{{ inventory_hostname }}"
+            method: GET
+            user: "{{ ise_api_user }}"
+            password: "{{ ise_api_password }}"
+            force_basic_auth: true
+            headers:
+              Accept: "application/json"
+            validate_certs: false
+          register: ise_device_lookup
+
+        - name: 2a. Lege fehlendes Network Device in ISE an
+          no_log: true
+          ansible.builtin.uri:
+            url: "https://{{ ise_pan_host }}:9060/ers/config/networkdevice"
+            method: POST
+            user: "{{ ise_api_user }}"
+            password: "{{ ise_api_password }}"
+            force_basic_auth: true
+            body_format: json
+            headers:
+              Accept: "application/json"
+              Content-Type: "application/json"
+            body:
+              NetworkDevice:
+                name: "{{ inventory_hostname }}"
+                NetworkDeviceIPList:
+                  - ipaddress: "{{ ise_device_ip }}"
+                    mask: "{{ ise_device_mask }}"
+                NetworkDeviceGroupList:
+                  - "Location#All Locations"
+                  - "Device Type#All Device Types"
+                tacacsSettings:
+                  connectModeOptions: "ON_LEGACY"
+                  sharedSecret: "{{ new_tacacs_secret }}"
+            validate_certs: false
+            status_code: 201
+          when: (ise_device_lookup.json.SearchResult.resources | default([]) | length) == 0
+
+        - name: 2c. ISE Network Device erneut abfragen
+          no_log: true
+          ansible.builtin.uri:
+            url: "https://{{ ise_pan_host }}:9060/ers/config/networkdevice?filter=name.EQ.{{ inventory_hostname }}"
+            method: GET
+            user: "{{ ise_api_user }}"
+            password: "{{ ise_api_password }}"
+            force_basic_auth: true
+            headers:
+              Accept: "application/json"
+            validate_certs: false
+          register: ise_device_lookup
+
+        - name: Prüfe, dass genau ein ISE Network Device gefunden wurde
+          ansible.builtin.assert:
+            that:
+              - (ise_device_lookup.json.SearchResult.resources | default([]) | length) == 1
+            fail_msg: "ISE muss genau ein Network Device namens {{ inventory_hostname }} zurückgeben."
+
+        - name: Setze ISE Device ID
+          ansible.builtin.set_fact:
+            ise_device_id: "{{ ise_device_lookup.json.SearchResult.resources[0].id }}"
+
+        - name: 3. Aktualisiere TACACS+ Shared Secret in Cisco ISE
+          no_log: true
+          ansible.builtin.uri:
+            url: "https://{{ ise_pan_host }}:9060/ers/config/networkdevice/{{ ise_device_id }}"
+            method: PUT
+            user: "{{ ise_api_user }}"
+            password: "{{ ise_api_password }}"
+            force_basic_auth: true
+            body_format: json
+            headers:
+              Content-Type: "application/json"
+              Accept: "application/json"
+            body:
+              NetworkDevice:
+                name: "{{ inventory_hostname }}"
+                NetworkDeviceIPList:
+                  - ipaddress: "{{ ise_device_ip }}"
+                    mask: "{{ ise_device_mask }}"
+                tacacsSettings:
+                  connectModeOptions: "ON_LEGACY"
+                  sharedSecret: "{{ new_tacacs_secret }}"
+            validate_certs: false
+
+        - name: 7. Schreibe neuen Secret in HashiCorp Vault KV-v2
+          no_log: true
+          community.hashi_vault.vault_kv2_write:
+            url: "{{ vault_addr }}"
+            engine_mount_point: "network"
+            path: "{{ device_vault_path }}"
+            auth_method: token
+            token: "{{ vault_token }}"
+            data:
+              tacacs_secret: "{{ new_tacacs_secret }}"
+              last_rotated: "{{ now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ') }}"
+      rescue:
+        - name: Melde Fehler bei der TACACS+ Rotation
+          ansible.builtin.fail:
+            msg: >-
+              TACACS+ Rotation für {{ inventory_hostname }} fehlgeschlagen.
+              Fehlerhafter Task: {{ ansible_failed_task.name }}.
+              ISE kann bereits aktualisiert worden sein; prüfe den Secret-Stand in ISE und Vault.
+              Sensible Task-Ausgaben sind unterdrückt; prüfe ISE-ERS- und Vault-Verbindung,
+              Berechtigungen sowie die Konfiguration des betroffenen Tasks.
+
+  #   - name: 4. Aktualisiere TACACS+ Server Key auf dem Cisco Device (IOS-XE)
+  #     no_log: true
+  #     cisco.ios.ios_config:
+  #       lines:
+  #         - "tacacs server ISE-PRIMARY"
+  #         - " address ipv4 10.1.1.50"
+  #         - " key 7 {{ new_tacacs_secret }}"
+
+  #   - name: 5. Verifiziere TACACS+ Erreichbarkeit & Login
+  #     cisco.ios.ios_command:
+  #       commands:
+  #         - "test aaa group tacacs+ testuser dummyPass legacy"
+  #     register: test_aaa
+  #     failed_when: "'user rejected' not in test_aaa.stdout[0] and 'passed' not in test_aaa.stdout[0]"
+  #     # Ein 'rejected' zeigt, dass die TACACS+-Verbindung und Verschlüsselung klappen (Credentials falsch, aber Key korrekt).
+
+  #   - name: 6. Speichere Konfiguration auf Cisco Device
+  #     cisco.ios.ios_config:
+  #       save_when: always
