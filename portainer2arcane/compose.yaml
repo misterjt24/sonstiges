@@ -1,0 +1,42 @@
+# Arcane – Docker-Management-UI (Ablösung für Portainer)
+# Ablage: /opt/arcane/compose.yaml  (zusammen mit /opt/arcane/.env)
+#
+# Start:   docker compose up -d
+# Prüfen:  docker compose ps && curl -s http://localhost:3552/health
+# Login:   http://<server>:3552  ->  arcane / arcane-admin (Passwortwechsel wird erzwungen)
+
+name: arcane
+
+services:
+  arcane:
+    # Versions-Tag pinnen: v2 = Patch-Updates der 2.x-Linie. Kein :latest, keine v3-Beta in Produktion.
+    image: ghcr.io/getarcaneapp/manager:v2
+    container_name: arcane
+    ports:
+      - "3552:3552"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - arcane-data:/app/data
+      # Host- und Container-Pfad identisch halten: hier liegen die Compose-Projekte (Stacks)
+      - /opt/stacks:/opt/stacks
+    environment:
+      - APP_URL=${APP_URL:-http://localhost:3552}
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:?ENCRYPTION_KEY in .env setzen (openssl rand -hex 32)}
+      - PROJECTS_DIRECTORY=/opt/stacks
+      - TZ=Europe/Berlin
+      # Hinter einem Reverse Proxy: CIDR des Proxy-Netzwerks eintragen (ab Arcane 2.16)
+      # - TRUSTED_PROXIES=172.18.0.0/16
+    cgroup: host # damit Arcane seine eigene Container-ID erkennt (Self-Upgrade)
+    healthcheck:
+      test: ["CMD", "./arcane", "health", "--timeout", "2s"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+    stop_grace_period: 15s
+
+volumes:
+  arcane-data:
