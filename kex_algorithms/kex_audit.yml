@@ -1,0 +1,75 @@
+---
+# Prüft per ssh-audit die KEX-Algorithmen aller Hosts im Inventory.
+# Sind ALLE angebotenen KEX-Algorithmen eines Hosts kritisch (fail),
+# werden diese in eine Logdatei geschrieben.
+#
+# Voraussetzung auf dem Ansible-Controller: ssh-audit (pip install ssh-audit)
+# Aufruf: ansible-playbook -i hosts.ini kex_audit.yml
+
+- name: KEX-Algorithmen mit ssh-audit prüfen
+  hosts: all
+  gather_facts: false
+  connection: local        # ssh-audit läuft auf dem Controller, nicht auf den Zielgeräten
+  vars:
+    ssh_audit_bin: ssh-audit
+    audit_target: "{{ ansible_host | default(inventory_hostname) }}"
+    audit_port: "{{ ansible_port | default(22) }}"
+    log_file: "{{ playbook_dir }}/logs/kex_critical.log"
+
+  tasks:
+    - name: ssh-audit ausführen (JSON-Ausgabe)
+      ansible.builtin.command: "{{ ssh_audit_bin }} -j -p {{ audit_port }} {{ audit_target }}"
+      register: audit
+      changed_when: false
+      failed_when: false   # ssh-audit liefert bei Warnungen/Fehlern rc != 0
+
+    - name: JSON auswerten
+      ansible.builtin.set_fact:
+        audit_json: "{{ audit.stdout | from_json }}"
+      when: audit.stdout | trim | length > 0 and audit.stdout is search('^\s*\{')
+
+    - name: KEX-Algorithmen und kritische KEX-Algorithmen ermitteln
+      ansible.builtin.set_fact:
+        kex_all: "{{ audit_json.kex | map(attribute='algorithm') | list }}"
+        kex_critical: >-
+          {{ audit_json.kex
+             | selectattr('notes.fail', 'defined')
+             | map(attribute='algorithm') | list }}
+      when: audit_json is defined
+
+    - name: Ergebnis bewerten
+      ansible.builtin.set_fact:
+        all_kex_critical: "{{ (kex_all | length > 0) and (kex_critical | length == kex_all | length) }}"
+      when: kex_all is defined
+
+    - name: Kritische KEX-Algorithmen loggen (nur wenn ALLE kritisch sind)
+      ansible.builtin.lineinfile:
+        path: "{{ log_file }}"
+        create: true
+        mode: "0640"
+        line: >-
+          {{ now().strftime('%Y-%m-%d %H:%M:%S') }} | {{ inventory_hostname }} ({{ audit_target }}:{{ audit_port }})
+          | alle KEX kritisch: {{ kex_critical | join(', ') }}
+      delegate_to: localhost
+      throttle: 1          # verhindert Schreibkonflikte bei parallelen Hosts
+      when: all_kex_critical | default(false)
+
+    - name: Host ohne auswertbares Ergebnis loggen
+      ansible.builtin.lineinfile:
+        path: "{{ log_file }}"
+        create: true
+        mode: "0640"
+        line: >-
+          {{ now().strftime('%Y-%m-%d %H:%M:%S') }} | {{ inventory_hostname }} ({{ audit_target }}:{{ audit_port }})
+          | FEHLER: keine ssh-audit-Ausgabe (nicht erreichbar oder ssh-audit fehlt)
+      delegate_to: localhost
+      throttle: 1
+      when: kex_all is not defined
+
+    - name: Zusammenfassung
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }}:
+          {{ kex_all | default([]) | length }} KEX gefunden,
+          {{ kex_critical | default([]) | length }} kritisch,
+          alle kritisch: {{ all_kex_critical | default('unbekannt') }}
